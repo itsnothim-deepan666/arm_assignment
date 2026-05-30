@@ -1,0 +1,405 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,booktabs,array,enumitem,hyperref}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.7em}
+
+\newcommand{\T}{\mathbf{T}}
+\newcommand{\R}{\mathbf{R}}
+\newcommand{\p}{\mathbf{p}}
+\newcommand{\q}{\mathbf{q}}
+\newcommand{\J}{\mathbf{J}}
+\newcommand{\zhat}{\hat{\mathbf{z}}}
+\newcommand{\Rotz}{\operatorname{Rot}_z}
+\newcommand{\Rotx}{\operatorname{Rot}_x}
+\newcommand{\Transz}{\operatorname{Trans}_z}
+\newcommand{\Transx}{\operatorname{Trans}_x}
+
+\title{SO101 3-DOF Arm: Simulation Model and Teaching Kinematics}
+\author{A self-contained teaching note}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Purpose}
+This document explains the current 3-degree-of-freedom arm project from first
+principles. It is written for a reader who has not seen the code before.
+
+The project intentionally has two kinematic layers:
+\begin{enumerate}[leftmargin=1.3em]
+  \item An intact MuJoCo simulation model. This preserves the recognizable
+        SO101 visual structure and uses the STL mesh assets.
+  \item A clean Denavit-Hartenberg teaching model. This gives a compact
+        parameter table, forward kinematics, Jacobian, and inverse kinematics.
+\end{enumerate}
+
+The MuJoCo model is the visual and simulation model. The DH model is the
+mathematical teaching model. They serve different purposes and should not be
+forced into a single model by moving mesh geometry into DH frames.
+
+\section{Abbreviations}
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+Abbreviation & Meaning \\
+\midrule
+3-DOF & Three degrees of freedom, meaning three independent joint variables \\
+SO101 & The original arm family from which the geometry/assets were derived \\
+MJCF & MuJoCo XML format, the model-description format used by MuJoCo \\
+MuJoCo & Multi-Joint dynamics with Contact, the physics simulator \\
+STL & Stereolithography mesh file, used here for visual robot parts \\
+TCP & Tool center point; here this is the \texttt{gripperframe} site used in FK/IK \\
+EE & End effector, the final fixed tool and gripper subassembly \\
+DH & Denavit-Hartenberg, a standard robot-link parameter convention \\
+FK & Forward kinematics, computing pose from joint angles \\
+IK & Inverse kinematics, computing joint angles from a desired pose/position \\
+COM & Center of mass \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Coordinate convention}
+The simulator uses a right-handed world coordinate system. In the project:
+\begin{itemize}[leftmargin=1.3em]
+  \item \(x\) points forward,
+  \item \(y\) points left,
+  \item \(z\) points upward.
+\end{itemize}
+
+The joint vector is
+\[
+\q =
+\begin{bmatrix}
+q_1 \\ q_2 \\ q_3
+\end{bmatrix}
+=
+\begin{bmatrix}
+\texttt{shoulder\_pan} \\
+\texttt{shoulder\_lift} \\
+\texttt{elbow\_flex}
+\end{bmatrix}.
+\]
+
+\section{The intact MuJoCo model}
+The MuJoCo body tree is:
+\[
+\begin{aligned}
+\text{world} &\rightarrow \text{base} \rightarrow \text{shoulder}
+\rightarrow \text{upper\_arm} \\
+&\rightarrow \text{lower\_arm} \rightarrow \text{wrist}
+\rightarrow \text{gripper} \rightarrow \text{moving\_jaw\_so101\_v1}.
+\end{aligned}
+\]
+
+Only the first three joints are actuated:
+\begin{center}
+\begin{tabular}{@{}llll@{}}
+\toprule
+Index & Joint name & Type & Range \\
+\midrule
+1 & shoulder pan & revolute hinge & \([-1.91986,\;1.91986]\) rad, \(\pm110.0^\circ\) \\
+2 & shoulder lift & revolute hinge & \([-1.7453293,\;1.7453293]\) rad, \(\pm100.0^\circ\) \\
+3 & elbow flex & revolute hinge & \([-1.69,\;1.69]\) rad, \(\pm96.8^\circ\) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The wrist and gripper bodies remain in the XML as fixed structure. The joint
+count is still three, but the visual and collision geometry keeps the original
+SO101 look.
+
+The relevant fixed offsets in the MuJoCo body tree are:
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+From & To & Translation in parent frame [m] \\
+\midrule
+base & shoulder & \((0.0388353,\;0,\;0.0624)\) \\
+shoulder & upper\_arm & \((-0.0303992,\;-0.0182778,\;-0.0542)\) \\
+upper\_arm & lower\_arm & \((-0.11257,\;-0.028,\;0)\) \\
+lower\_arm & wrist & \((-0.1349,\;0.0052,\;0)\) \\
+wrist & gripper & \((5.55112\text{e-}17,\;-0.0611,\;0.0181)\) \\
+gripper & gripperframe site & \((0.012,\;-0.000218,\;-0.098127)\) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+These are exact simulator offsets, not the simplified DH parameters. They keep
+the imported STL parts visually coherent.
+
+\section{Rigid transforms}
+A rigid transform is represented by a homogeneous matrix
+\[
+\T =
+\begin{bmatrix}
+\R & \p \\
+0\;0\;0 & 1
+\end{bmatrix},
+\]
+where \(\R\) is a \(3 \times 3\) rotation matrix and \(\p\) is a position vector.
+
+For a revolute joint about the local \(z\)-axis,
+\[
+\Rotz(q) =
+\begin{bmatrix}
+\cos q & -\sin q & 0 & 0 \\
+\sin q & \cos q & 0 & 0 \\
+0 & 0 & 1 & 0 \\
+0 & 0 & 0 & 1
+\end{bmatrix}.
+\]
+
+The exact MuJoCo FK is therefore a product of fixed body transforms and three
+joint rotations:
+\[
+\T_{0,\mathrm{ee}}(\q)
+=
+\T_{0,b}
+\T_{b,s}^{0}\Rotz(q_1)
+\T_{s,u}^{0}\Rotz(q_2)
+\T_{u,l}^{0}\Rotz(q_3)
+\T_{l,w}^{0}
+\T_{w,g}^{0}
+\T_{g,\mathrm{ee}}^{0}.
+\]
+
+In the code, FK and IK use the \texttt{gripperframe} site as the end-effector
+reference point.
+
+\section{Why a separate DH model exists}
+The STL meshes and SO101 body frames were not authored as textbook DH frames.
+If the XML body tree is forcibly rewritten as DH frames, the visual mesh origins
+no longer line up and the robot can look disjointed.
+
+For teaching, a separate DH model is cleaner:
+\begin{itemize}[leftmargin=1.3em]
+  \item the table is short,
+  \item FK is a loop over rows,
+  \item the Jacobian is easy to derive,
+  \item IK can be taught using planar two-link geometry after the base yaw.
+\end{itemize}
+
+\section{Standard DH convention}
+This project uses standard DH:
+\[
+\T_{i-1,i}
+=
+\Rotz(\theta_i)\Transz(d_i)\Transx(a_i)\Rotx(\alpha_i).
+\]
+
+The four DH symbols mean:
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+Symbol & Meaning \\
+\midrule
+\(\theta_i\) & joint rotation about \(z_{i-1}\); here this is \(q_i\) \\
+\(d_i\) & offset along \(z_{i-1}\) \\
+\(a_i\) & link length along \(x_i\) \\
+\(\alpha_i\) & link twist about \(x_i\) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Deriving the DH parameters}
+The DH table is a teaching simplification of the intact robot. The goal is to
+keep the original 3-link arm structure while making the math transparent.
+
+The derivation is easiest to read from the joint axes:
+\begin{enumerate}[leftmargin=1.3em]
+  \item Joint 1 is the base yaw. Its axis is vertical, so we choose \(z_0\)
+        along the shoulder pan axis. The next joint axis is orthogonal to it,
+        which gives the standard DH twist \(\alpha_1 = +\pi/2\).
+  \item The shoulder pitch and elbow pitch are parallel hinge axes. The
+        distance between their axes along the arm centerline is \(117.5\) mm,
+        so the second link length is \(a_2 = 0.1175\) m and \(\alpha_2 = 0\).
+  \item The elbow pitch to fixed tool/wrist line is another parallel pair with
+        a centerline separation of \(95.0\) mm, so \(a_3 = 0.0950\) m and
+        \(\alpha_3 = 0\).
+  \item The shoulder axis sits \(59.5\) mm above the world origin, which is
+        captured by \(d_1 = 0.0595\) m. The remaining links are modeled as
+        planar offsets, so \(d_2 = d_3 = 0\).
+  \item The gripper/tool center lies another \(10\) mm along the final
+        \(x\)-axis, which becomes the teaching tool offset \(a_{tcp}=0.0100\)
+        m.
+\end{enumerate}
+
+In other words, the DH model keeps the arm's three active axes and the gross
+link lengths, but it absorbs the detailed wrist and gripper shape into a fixed
+tool offset.
+
+\section{Teaching DH table}
+The teaching DH model uses:
+\begin{center}
+\begin{tabular}{@{}llllll@{}}
+\toprule
+\(i\) & Joint & \(\theta_i\) & \(d_i\) [m] & \(a_i\) [m] & \(\alpha_i\) \\
+\midrule
+1 & shoulder pan & \(q_1\) & ? & ? & ? \\
+2 & shoulder lift & \(q_2\) & ? & ? & ? \\
+3 & elbow flex & \(q_3\) & ? & ? & ? \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The TCP/tool offset is
+\[
+a_{tcp} = ? \text{ m}
+\]
+along the final \(x\)-axis. This represents the 10 mm ball radius/tool offset in
+the teaching model.
+
+\section{DH forward kinematics}
+The full DH transform is
+\[
+\T_{0,tcp}^{DH}(\q)
+=
+\T_{0,1}(q_1)\T_{1,2}(q_2)\T_{2,3}(q_3)\Transx(a_{tcp}).
+\]
+
+For the TCP position, this can be reduced to a set of trigonometric equations for \(x\), \(y\), and \(z\) in terms of the joint angles and link lengths. (Derive these as part of your exercise!)
+
+\section{Workspace limits}
+For the DH teaching model, the moving part after the base yaw is a planar
+two-link arm:
+\[
+L_2 = a_2 = 0.1175\text{ m}, \qquad
+L_3 = a_3+a_{tcp} = 0.1050\text{ m}.
+\]
+
+Ignoring joint limits, the TCP distance from the shoulder pitch frame must obey
+\[
+|L_2-L_3| \leq \sqrt{x^2+y^2+(z-d_1)^2} \leq L_2+L_3.
+\]
+
+Numerically:
+\[
+0.0125\text{ m} \leq
+\sqrt{x^2+y^2+(z-0.0595)^2}
+\leq 0.2225\text{ m}.
+\]
+
+So the idealized maximum reach from the shoulder pitch frame is
+\[
+0.2225\text{ m} = 222.5\text{ mm}.
+\]
+
+The base yaw sweeps this planar workspace around the vertical axis, but only
+through its joint range:
+\[
+q_1 \in [-1.91986,\;1.91986]\text{ rad}
+= [-110.0^\circ,\;110.0^\circ].
+\]
+
+Without joint limits, the TCP height is bounded by
+\[
+z_{min} = 0.0595 - 0.2225 = -0.1630\text{ m}
+\]
+and
+\[
+z_{max} = 0.0595 + 0.2225 = 0.2820\text{ m}.
+\]
+
+With the actual joint limits,
+\[
+\begin{aligned}
+q_2 &\in [-1.7453293,\;1.7453293]\text{ rad}
+= [-100.0^\circ,\;100.0^\circ],\\
+q_3 &\in [-1.69,\;1.69]\text{ rad}
+= [-96.8^\circ,\;96.8^\circ],
+\end{aligned}
+\]
+the real reachable region is a subset of that ideal volume. A target can be
+inside the ideal distance bound and still fail if it requires a forbidden joint
+angle.
+
+For inverse kinematics inputs, it is often useful to know approximate
+axis-aligned bounds of reachable TCP positions. With the DH teaching model and
+the joint limits above, a grid/optimization search gives:
+\[
+\begin{aligned}
+x &\in [-0.1254,\;0.2225]\text{ m},\\
+y &\in [-0.2225,\;0.2225]\text{ m},\\
+z &\in [-0.1630,\;0.2820]\text{ m}.
+\end{aligned}
+\]
+
+Equivalently, in millimeters:
+\[
+\begin{aligned}
+x &\in [-125.4,\;222.5]\text{ mm},\\
+y &\in [-222.5,\;222.5]\text{ mm},\\
+z &\in [-163.0,\;282.0]\text{ mm}.
+\end{aligned}
+\]
+
+These are independent coordinate bounds, not a rectangular box in which every
+point is reachable. A target such as \((0.22,0.22,0.28)\) m is inside the
+coordinate ranges but is still unreachable because it violates the arm's radial
+reach. The negative \(x\) bound is possible because the signed planar term
+\(r\) can become negative when the elbow folds back within its joint limits.
+
+\section{Jacobian}
+The position Jacobian maps joint velocity to TCP linear velocity:
+\[
+\dot{\p}_{tcp} = \J_p(\q)\dot{\q}.
+\]
+
+For the DH teaching model, derive the analytical Jacobian by taking the partial derivatives of your forward kinematics position equations with respect to each joint variable.
+
+\section{Inverse kinematics}
+The IK problem asks for \(\q\) given a target end-effector position
+\[
+\p_d = [x_d,\;y_d,\;z_d]^T.
+\]
+
+Hint: The base joint \(q_1\) can be found from the horizontal projection of the target.
+
+Then the remaining two joints solve a planar two-link problem. You can use the law of cosines to find the two possible elbow branches for \(q_3\), and then solve for \(q_2\). (Derive the exact equations as part of your exercise!)
+
+\section{Validation}
+Current checks:
+\begin{itemize}[leftmargin=1.3em]
+  \item The intact MuJoCo model loads and steps with three joints and three actuators.
+  \item Exact simulator FK is checked by reading the \texttt{gripperframe} site after setting joint values.
+  \item The IK solver uses an analytical derivation based purely on the DH parameters.
+\end{itemize}
+
+The important interpretation is:
+\begin{itemize}[leftmargin=1.3em]
+  \item MuJoCo FK is exact for the simulation model.
+  \item DH FK/IK is exact for the teaching model.
+  \item They are intentionally separate so the visual robot stays intact.
+\end{itemize}
+
+\section{Keyframes}
+The model includes:
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Keyframe & Joint values [rad] & Joint values [deg] \\
+\midrule
+home & \([0,\;0,\;0]\) & \([0.0,\;0.0,\;0.0]\) \\
+ready & \([0,\;0.6,\;-0.8]\) & \([0.0,\;34.4,\;-45.8]\) \\
+reach forward & \([0,\;1.0,\;-1.0]\) & \([0.0,\;57.3,\;-57.3]\) \\
+reach left & \([1.2,\;0.6,\;-0.8]\) & \([68.8,\;34.4,\;-45.8]\) \\
+folded & \([0,\;-1.76,\;1.74]\) & \([0.0,\;-100.8,\;99.7]\) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Summary}
+The project should be read as:
+\[
+\text{intact SO101 MuJoCo model} + \text{clean DH teaching model}.
+\]
+
+This keeps the robot visually recognizable and physically simulatable while
+still giving students a clear DH table, FK derivation, Jacobian, and IK solver.
+
+\end{document}
