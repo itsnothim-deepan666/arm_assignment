@@ -13,6 +13,7 @@ from planning import ik_logic_target as ik_logic
 def validate(filename):
     fk_errors = []
     ik_errors = []
+    ik_val_compare = []
     
     with open(filename, 'r') as f:
         reader = csv.reader(f)
@@ -42,17 +43,21 @@ def validate(filename):
             
             ik_err = min(sol_down.position_error, sol_up.position_error)
             ik_errors.append(ik_err)
+
+            ik_val_compare.append((q_true, pos_true, sol_down.q, sol_up.q))
+
             
     fk_errors = np.array(fk_errors)
     ik_errors = np.array(ik_errors)
-    
+
+
     print("\n--- Validation Results against _target_sol.py files ---")
     print(f"Total targets tested: {len(fk_errors)}")
     print(f"FK Max Error : {fk_errors.max()*1000:.6f} mm")
     print(f"FK Mean Error: {fk_errors.mean()*1000:.6f} mm")
     print(f"IK Max Error : {ik_errors.max()*1000:.6f} mm")
     print(f"IK Mean Error: {ik_errors.mean()*1000:.6f} mm")
-    
+
 if __name__ == "__main__":
     csv_file = os.path.join(ROOT_DIR, "docs", "targets.csv")
     validate(csv_file)
