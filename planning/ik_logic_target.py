@@ -4,7 +4,7 @@ import numpy as np
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(ROOT_DIR)
-from planning import dh
+from planning import dh_target as dh
 
 class IKSolution:
     def __init__(self, q, converged, iterations, position_error):
@@ -26,12 +26,27 @@ def solve(target, q0=None, elbow="down"):
     """
     TODO: Implement the analytical inverse kinematics for the 3-DOF arm.
     """
+
     target = np.asarray(target, dtype=float).reshape(3)
     limits = dh.JOINT_LIMITS
+    
+    q1 = np.atan2(target[1], target[0])
+    r = np.hypot(target[0], target[1])
+    D = (r**2 + (target[2] - dh.DH_PARAMS[0][1])**2 - dh.DH_PARAMS[1][0]**2 - (dh.DH_PARAMS[2][0] + dh.EE_OFFSET)**2)/(2*dh.DH_PARAMS[1][0]*(dh.DH_PARAMS[2][0] + dh.EE_OFFSET))
+    if abs(D) > 1.0:
+        q = np.array([np.nan, np.nan, np.nan])
+        err = float(np.inf)
+        return IKSolution(q=q, converged=False, iterations=0, position_error=err)
 
-    # Placeholder: just return zeros
-    q = np.zeros(3)
+    q3 = np.arctan2(np.sqrt(1 - D**2), D) if elbow == "up" else np.arctan2(-np.sqrt(1 - D**2), D)
+    q2 = np.arctan2(target[2] - dh.DH_PARAMS[0][1], r) - np.arctan2((dh.DH_PARAMS[2][0] + dh.EE_OFFSET) * np.sin(q3), dh.DH_PARAMS[1][0] + (dh.DH_PARAMS[2][0] + dh.EE_OFFSET) * np.cos(q3))
+    q1 = wrap_to_pi(q1)
+    q = np.array([q1, q2, q3])
+    
+    q = clamp_to_limits(q, limits)
+
     err = float(np.linalg.norm(target - dh.position(q)))
+
     return IKSolution(q=q, converged=False, iterations=0, position_error=err)
 
 def print_solution(target, sol, fk_pos):
