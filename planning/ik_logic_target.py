@@ -43,7 +43,7 @@ def solve(target, q0=None, elbow="down"):
     q1 = wrap_to_pi(q1)
     q = np.array([q1, q2, q3])
     
-    q = clamp_to_limits(q, limits)
+    #q = clamp_to_limits(q, limits)
 
     err = float(np.linalg.norm(target - dh.position(q)))
 
