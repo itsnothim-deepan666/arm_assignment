@@ -45,7 +45,8 @@ def solve(target, q0=None, elbow="down"):
     q = np.array([q1, q2, q3])
     
     #q = clamp_to_limits(q, limits)
-    err = np.linalg.norm(dh.position(q) - target)
+
+    err = float(np.linalg.norm(target - dh.position(q)))
 
     return IKSolution(q=q, converged=False, iterations=0, position_error=err)
 
