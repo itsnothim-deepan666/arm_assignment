@@ -13,9 +13,9 @@ import numpy as np
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(ROOT_DIR)
 
-from planning import ik_logicv2
-from planning import fk_logic
-from planning import dh
+from planning import ik_logic_target as ik_logicv2
+from planning import fk_logic_target as fk_logic
+from planning import dh_target
 
 def run_viewer(model, data, target_q, title):
     import mujoco.viewer
@@ -30,7 +30,7 @@ def run_viewer(model, data, target_q, title):
     print("Close the viewer window to exit.")
     
     # Set the actuators' control signals to the target IK solution
-    for name, q_val in zip(fk_logic.JOINT_NAMES, target_q):
+    for name, q_val in zip(dh_target.JOINT_NAMES, target_q):
         act_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, name)
         if act_id >= 0:
             data.ctrl[act_id] = q_val
@@ -40,6 +40,14 @@ def run_viewer(model, data, target_q, title):
         mujoco.mj_step(model, data)
         viewer.sync()
         time.sleep(model.opt.timestep)
+
+def load_model(xml_path):
+    if not os.path.isabs(xml_path):
+        xml_path = os.path.join(ROOT_DIR, xml_path)
+
+    model = mujoco.MjModel.from_xml_path(xml_path)
+    data = mujoco.MjData(model)
+    return model, data
 
 
 def main():
@@ -51,14 +59,14 @@ def main():
     args = parser.parse_args()
 
     # Load MuJoCo model for visualization
-    model, data = fk_logic.load_model(args.xml)
+    model, data = load_model(args.xml)
     
     target = np.array(args.target, dtype=float)
     seed = np.array(args.seed, dtype=float) if args.seed is not None else None
 
     # Pure DH IK solve
     sol = ik_logicv2.solve(target, seed, elbow=args.elbow)
-    fk_pos = dh.position(sol.q)
+    fk_pos = dh_target.position(sol.q)
     ik_logicv2.print_solution(target, sol, fk_pos)
 
     # Set initial state to the 'folded' keyframe

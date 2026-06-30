@@ -1,3 +1,4 @@
+import argparse
 import os
 import sys
 import numpy as np
@@ -52,3 +53,9 @@ def run_sweep(n):
     print(f"  x range: [{mins[0]:+.6f}, {maxs[0]:+.6f}] m")
     print(f"  y range: [{mins[1]:+.6f}, {maxs[1]:+.6f}] m")
     print(f"  z range: [{mins[2]:+.6f}, {maxs[2]:+.6f}] m")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run FK checks for the 3-DOF arm")
+    parser.add_argument("--q", nargs=3, type=float, metavar=("Q1", "Q2", "Q3"), help="Joint angles in radians")
+    args = parser.parse_args()
+    print(fk(np.array(args.q, dtype=float))[0])

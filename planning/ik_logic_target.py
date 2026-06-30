@@ -2,6 +2,7 @@ import os
 import sys
 import numpy as np
 import csv
+import argparse
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(ROOT_DIR)
@@ -31,7 +32,7 @@ def solve(target, q0=None, elbow="down"):
     target = np.asarray(target, dtype=float).reshape(3)
     limits = dh.JOINT_LIMITS
     
-    q1 = np.atan2(target[1], target[0])
+    q1 = np.arctan2(target[1], target[0])
     r = np.hypot(target[0], target[1])
     D = (r**2 + (target[2] - dh.DH_PARAMS[0][1])**2 - dh.DH_PARAMS[1][0]**2 - (dh.DH_PARAMS[2][0] + dh.EE_OFFSET)**2)/(2*dh.DH_PARAMS[1][0]*(dh.DH_PARAMS[2][0] + dh.EE_OFFSET))
     if abs(D) > 1.0:
@@ -44,7 +45,7 @@ def solve(target, q0=None, elbow="down"):
     q1 = wrap_to_pi(q1)
     q = np.array([q1, q2, q3])
     
-    #q = clamp_to_limits(q, limits)
+    q = clamp_to_limits(q, limits)
 
     err = float(np.linalg.norm(target - dh.position(q)))
 
@@ -75,3 +76,11 @@ def run_sweep(n):
     print(f"  max error  = {errors.max() * 1000:.6f} mm")
     print(f"  mean error = {errors.mean() * 1000:.6f} mm")
     print(f"  all < 1 mm = {'YES' if np.all(errors < 1e-3) else 'NO'}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Test the pure DH IK solver")
+    parser.add_argument("--target", nargs=3, type=float, metavar=("X", "Y", "Z"), help="Target position in meters")
+    parser.add_argument("--upordown", choices=("up", "down"), default="down", help="Elbow configuration")
+    args = parser.parse_args()
+    print(solve(np.array(args.target), elbow=args.upordown).q)
